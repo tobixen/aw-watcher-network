@@ -1,11 +1,10 @@
 import subprocess
 from subprocess import PIPE
-from time import sleep
+from time import sleep, time
+from datetime import datetime, timezone
 import logging
 import re
 import sys
-from datetime import datetime
-import pytz
 from wireless import Wireless
 
 from aw_core.models import Event
@@ -30,7 +29,7 @@ def ping(nbr) -> str:
     return " ".join(out.split("\n")[-3:-1])
 
 # Parses data
-def createEvents(out,timestamp,wifiname):
+def createEvent(out,timestamp,wifiname):
     spacesep = out.split(" ")
     maxping = 0
     meanping = 0
@@ -40,18 +39,18 @@ def createEvents(out,timestamp,wifiname):
     received = int(spacesep[3])
     failed = total - received
 
-    if(spacesep[-1] == "ms"):
+    
+
+    if(spacesep[-1] == "ms" and received):
         extract = out.split("/")
         maxping = float(extract[-2])
         meanping = float(extract[-3])
         minping = float(extract[-4].split("= ")[-1])
-        events.append(Event(timestamp=timestamp, label=["received","ssid:"+wifiname], count=received,
-            duration=[{"value":meanping,"unit":"ms","label":meanping},
-            {"value":maxping,"unit":"ms","label":maxping},{"value":minping,
-            "unit":"ms","label":minping}]))
-    events.append(Event(timestamp=timestamp, label=["failed", "ssid:"+wifiname], count=failed))
-
-    return events
+        return Event(timestamp=timestamp, data={"status": "up", "label": f"ssid:{wifiname}"})
+            #label=["received","ssid:"+wifiname], count=received,
+            #duration=[{"value":meanping,"unit":"ms","label":meanping},{"value":maxping,"unit":"ms","label":maxping},{"value":minping,"unit":"ms","label":minping}]))
+    return Event(timestamp=timestamp, data={"status": "down", "label": f"ssid:{wifiname}"})
+    #return Event(timestamp=timestamp, data=f"failed:{count}, ssid:{wifiname}")
 
 def main():
     import argparse
@@ -68,17 +67,15 @@ def main():
     eventtype = "ping"
     client.create_bucket(bucketname, eventtype)
     logger.info("Starting to log ping")
-
+    last_ts = time()
 
     while True:
-        t = datetime.utcnow()
-        sleeptime = 60 - (t.second + t.microsecond/1000000.0)
-        sleep(sleeptime)
-        timestamp = datetime.now(pytz.utc)
+        sleep(time()%60)
+        timestamp = datetime.now(timezone.utc)
         wifiname = Wireless().current()
         try:
             out = ping(30)
-            client.send_events(bucketname, createEvents(out,timestamp,wifiname))
+            client.insert_event(bucketname, createEvent(out,timestamp,wifiname))
             logger.info("Sent events")
                 
         except Exception as e:
